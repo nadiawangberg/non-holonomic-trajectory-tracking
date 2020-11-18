@@ -18,7 +18,9 @@ class Odom: #for a 3DOF mobile robot
 curr_odom = Odom() #curr pose
 goal_odom = Odom() #end of trajectory pose
 init_odom = Odom() #start of trajectory pose
-curr_waypoint = Odom() #pose of current trajectory waypoint
+
+xd, yd, thd = 0,0,0
+vd, wd = 0,0
 
 path_index = 0
 step = 0
@@ -38,8 +40,6 @@ def quaternion_to_euler(quaternion):
 def quat_to_yaw(quat): #works as the quaternion represents rotations around z axis only (only yaw)
     q = Quaternion(quat.w, quat.x, quat.y, quat.z)
     q_np = np.array([quat.w, quat.x, quat.y, quat.z])
-    #print(q.axis)
-
     euler_angles = quaternion_to_euler(q_np)
     return euler_angles[2] #q.radians#can also do q.radians (TODO, should double check that this work / use ssa(angle))
 
@@ -120,10 +120,10 @@ def CubicCartesianPolynomial(init_pose, goal_pose, s_arr, k): #find path
         #generate array of poses
         pos = toPose(x_arr[i], y_arr[i], th_arr[i])
         pose_list.append(pos)
-        pose_arr = toPoseArr(pose_list)
+        #pose_arr = toPoseArr(pose_list)
 
     #convert to ros pose array
-    return pose_arr, v_tilde_arr, w_tilde_arr 
+    return pose_list, v_tilde_arr, w_tilde_arr 
 
 def ssa(angle): #in radian
     return (angle+np.pi)%(2*np.pi)-np.pi
@@ -151,7 +151,7 @@ def finderror(xd, yd, thd, x,y,th): #input given in world coordinates
     # error in world frame (cartesian error)
     e1_w = xd - x
     e2_w = yd - y
-    e3_w = thd - th
+    e3_w = ssa(thd - th)
 
     e1 = e1_w*np.cos(th) + e2_w*np.sin(th)
     e2 = -e1_w*np.sin(th) + e2_w*np.cos(th)
@@ -159,8 +159,20 @@ def finderror(xd, yd, thd, x,y,th): #input given in world coordinates
 
     return e1, e2, e3 #output rotated to align with body
 
+def control(e1,e2,e3,  zeta,a,  wd,vd):
+    k1 = 2*zeta*a
+    k3 = k1
+    k2 = (a**2 - wd**2) / vd
+    u1 = -k1*e1
+    u2 = -k2*e2 -k3*e3
+    cmd_v = vd*np.cos(e3)-u1
+    cmd_w = wd-u2
+
+    return cmd_v,cmd_w
+
+
 def planner():
-    T = 10.0 #path should take 5seconds
+    T = 30.0 #path should take 5seconds
     cmd_vel_pub = rospy.Publisher('cmd_vel', Twist, queue_size=10)
     traj_debug_pub = rospy.Publisher('traj_debug', PoseArray, queue_size=10)
 
@@ -171,43 +183,43 @@ def planner():
     rospy.Subscriber("move_base_simple/goal", PoseStamped, goalCB)
     time_i = rospy.Time.now().to_sec()
 
-    rate = rospy.Rate(10) # 10hz
+    rate = rospy.Rate(30) # 30hz
     while not rospy.is_shutdown():
         if goal_odom.x != None: #We have a goal
             #PLANNING
-            s_arr = list(np.arange(0,1,1/T))
+            ds = 1/T # = dtau
+            s_arr = list(np.arange(0,1,ds))
             path_k = 15 #tuning param for path
-            pose_arr, v_arr, w_arr = CubicCartesianPolynomial(init_odom, goal_odom, s_arr, path_k)
-            traj_debug_pub.publish(pose_arr)
+            pose_list, v_tilde_arr, w_tilde_arr = CubicCartesianPolynomial(init_odom, goal_odom, s_arr, path_k)
+            traj_debug_pub.publish(toPoseArr(pose_list))
 
             #CONTROL
-            """
-            e1, e2, e3 = finderror(goal_odom.x, goal_odom.y, goal_odom.theta, curr_odom.x, curr_odom.y, curr_odom.theta)
-            zeta = 1 #relative damping ratio
-            a = 1 #w0, natural frequency
-            k1 = 2*zeta*a
-            k3 = k1
-            k2 = (a**2 - wd**2) / vd
-            u1 = -k1*e1
-            u2 = -k2*e2 -k3*e3
-            cmd_v = vd*np.cos(e3)-u1
-            cmd_w = wd-u2
-            """
-
-            #Naive controller
             cmd_vel = Twist()
             timepassed = rospy.Time.now().to_sec() - time_i
-            print(timepassed)
+
             global step
+            global xd,yd,thd, vd,wd
+
             if (timepassed >= 1.0 and step < T-1): #1 sek between
                 step += 1
                 time_i = rospy.Time.now().to_sec()
-                vd = (1/T)*v_arr[step]
-                wd = (1/T)*w_arr[step]
-                cmd_vel.linear.x = vd
-                cmd_vel.angular.z = wd
-                cmd_vel_pub.publish(cmd_vel)
 
+                w_tild = w_tilde_arr[step]
+                v_tild = v_tilde_arr[step]
+
+                xd = pose_list[step-1].position.x
+                yd = pose_list[step-1].position.y
+                thd = quat_to_yaw(pose_list[step].orientation)
+                vd = (1/T)*v_tild
+                wd = (1/T)*w_tild
+
+            #Feedback controller
+            e1,e2,e3 = finderror(xd,yd,thd, curr_odom.x,curr_odom.y,curr_odom.theta)
+            cmd_v,cmd_w = control(e1,e2,e3,  1,1,  wd,vd)
+
+            cmd_vel.linear.x = cmd_v
+            cmd_vel.angular.z = cmd_w
+            cmd_vel_pub.publish(cmd_vel)
 
 
         rate.sleep()
