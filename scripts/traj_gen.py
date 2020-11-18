@@ -21,6 +21,7 @@ init_odom = Odom() #start of trajectory pose
 curr_waypoint = Odom() #pose of current trajectory waypoint
 
 path_index = 0
+step = 0
 
 init_time = None
 
@@ -52,7 +53,7 @@ def odomCB(odom_msg):
     curr_odom.theta_dot = odom_msg.twist.twist.angular.z #angular velocity
 
 def goalCB(goal_msg):
-    global goal_odom, init_odom
+    global goal_odom, init_odom, step
     init_time = rospy.Time.now()
 
     goal_odom.x = goal_msg.pose.position.x
@@ -62,8 +63,7 @@ def goalCB(goal_msg):
     init_odom.x = curr_odom.x
     init_odom.y = curr_odom.y
     init_odom.theta = curr_odom.theta
-
-    #rospy.loginfo("Goal angle: %f", np.rad2deg(goal_odom.theta))
+    step = 0
 
 def CubicCartesianPolynomial(init_pose, goal_pose, s_arr, k): #find path
     backward = False # k in (0,1)
@@ -96,6 +96,8 @@ def CubicCartesianPolynomial(init_pose, goal_pose, s_arr, k): #find path
     w_tilde_arr[0] = w_tilde_arr[1] = 0 #TODO, this is just a guess
     th_arr[0] = thi
 
+    pose_list = []
+
     for i in range(N): #i is the index of s
         s = s_arr[i]
         x_arr[i] = s**3*xf - (s-1)**3*xi + alpha_x*s**2*(s-1) + beta_x*s*(s-1)**2
@@ -114,50 +116,51 @@ def CubicCartesianPolynomial(init_pose, goal_pose, s_arr, k): #find path
 
             v_tilde_arr[i] = (-1)**backward * np.sqrt(x_dash**2 + y_dash**2) #samme som v_d bortsett fra at pos derivert brukt i steden
             w_tilde_arr[i] = (y_dash2x*x_dash-x_dash2x*y_dash)/(x_dash**2+y_dash**2)
-    return x_arr, y_arr, th_arr, v_tilde_arr, w_tilde_arr
 
-def send_vel(v_tilde_arr, w_tilde_arr):
-    N = len(v_tilde_arr)
+        #generate array of poses
+        pos = toPose(x_arr[i], y_arr[i], th_arr[i])
+        pose_list.append(pos)
+        pose_arr = toPoseArr(pose_list)
 
-    for i in range(N):
-        v_d = 0.01*v_tilde_arr[i] #TODO, guess..
-        w_d = 0.01*w_tilde_arr[i]
-
-
-
-
-        u1 = -k1*e1
-        u2 = -k2*e2 - k3*e3
-    return 0
+    #convert to ros pose array
+    return pose_arr, v_tilde_arr, w_tilde_arr 
 
 def ssa(angle): #in radian
     return (angle+np.pi)%(2*np.pi)-np.pi
 
+def toPose(x,y,theta):
+    pos = Pose()
+    pos.position.x = x
+    pos.position.y = y
 
+    orient = Quaternion(axis = (0.0, 0.0, 1.0), radians = theta)
+    pos.orientation.w = orient.w
+    pos.orientation.x = orient.x
+    pos.orientation.y = orient.y
+    pos.orientation.z = orient.z
+    return pos
 
-def generate_trajectory(init_odom, goal_odom, s_arr, k):
-    xd_arr, yd_arr, thd_arr, v_tilde_arr, w_tilde_arr = CubicCartesianPolynomial(init_odom, goal_odom, s_arr, k)
-    pose_arr = []
-    for i in range(len(xd_arr)):
-        pos = Pose()
-        pos.position.x = xd_arr[i]
-        pos.position.y = yd_arr[i]
+def toPoseArr(pose_list):
+    pose_arr = PoseArray()
+    pose_arr.header.frame_id = 'odom'
+    pose_arr.header.stamp = rospy.Time.now()
+    pose_arr.poses = pose_list
+    return pose_arr
 
-        orient = Quaternion(axis = (0.0, 0.0, 1.0), radians = thd_arr[i])
-        pos.orientation.w = orient.w
-        pos.orientation.x = orient.x
-        pos.orientation.y = orient.y
-        pos.orientation.z = orient.z
-        pose_arr.append(pos) 
-    
-    discrete_path = PoseArray()
-    discrete_path.header.frame_id = 'odom'
-    discrete_path.header.stamp = rospy.Time.now()
-    discrete_path.poses = pose_arr
-    return discrete_path
+def finderror(xd, yd, thd, x,y,th): #input given in world coordinates
+    # error in world frame (cartesian error)
+    e1_w = xd - x
+    e2_w = yd - y
+    e3_w = thd - th
+
+    e1 = e1_w*np.cos(th) + e2_w*np.sin(th)
+    e2 = -e1_w*np.sin(th) + e2_w*np.cos(th)
+    e3 = e3_w
+
+    return e1, e2, e3 #output rotated to align with body
 
 def planner():
-    T = 50 #path should take 5seconds
+    T = 10.0 #path should take 5seconds
     cmd_vel_pub = rospy.Publisher('cmd_vel', Twist, queue_size=10)
     traj_debug_pub = rospy.Publisher('traj_debug', PoseArray, queue_size=10)
 
@@ -166,34 +169,44 @@ def planner():
     #Subscrubur
     rospy.Subscriber("odom", Odometry, odomCB)
     rospy.Subscriber("move_base_simple/goal", PoseStamped, goalCB)
+    time_i = rospy.Time.now().to_sec()
 
     rate = rospy.Rate(10) # 10hz
     while not rospy.is_shutdown():
         if goal_odom.x != None: #We have a goal
-            #DEFINE ERRORS
-            e1 = curr_odom.x - goal_odom.x
-            e2 = curr_odom.y - goal_odom.y
-            e3 = curr_odom.theta - goal_odom.theta
-
             #PLANNING
-            s_arr = list(np.arange(0,1,0.01))
-            path_k = 1 #tuning param for path
-            disc_path = generate_trajectory(init_odom, goal_odom, s_arr, path_k)
-            traj_debug_pub.publish(disc_path)
+            s_arr = list(np.arange(0,1,1/T))
+            path_k = 15 #tuning param for path
+            pose_arr, v_arr, w_arr = CubicCartesianPolynomial(init_odom, goal_odom, s_arr, path_k)
+            traj_debug_pub.publish(pose_arr)
 
             #CONTROL
+            """
+            e1, e2, e3 = finderror(goal_odom.x, goal_odom.y, goal_odom.theta, curr_odom.x, curr_odom.y, curr_odom.theta)
             zeta = 1 #relative damping ratio
             a = 1 #w0, natural frequency
             k1 = 2*zeta*a
             k3 = k1
-            k2 = 0.1
-            #k2 = (a**2 - wd**2) / vd
+            k2 = (a**2 - wd**2) / vd
+            u1 = -k1*e1
+            u2 = -k2*e2 -k3*e3
+            cmd_v = vd*np.cos(e3)-u1
+            cmd_w = wd-u2
+            """
 
+            #Naive controller
             cmd_vel = Twist()
-            cmd_vel.linear.x = -k1*e1
-            #cmd_vel.angular.z = 0.1*(-k2*e2 -k3*e3)
-
-            cmd_vel_pub.publish(cmd_vel)
+            timepassed = rospy.Time.now().to_sec() - time_i
+            print(timepassed)
+            global step
+            if (timepassed >= 1.0 and step < T-1): #1 sek between
+                step += 1
+                time_i = rospy.Time.now().to_sec()
+                vd = (1/T)*v_arr[step]
+                wd = (1/T)*w_arr[step]
+                cmd_vel.linear.x = vd
+                cmd_vel.angular.z = wd
+                cmd_vel_pub.publish(cmd_vel)
 
 
 
