@@ -4,7 +4,6 @@ import rospy
 from std_msgs.msg import String
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped, Pose, Twist, PoseArray
-from pyquaternion import Quaternion
 import numpy as np
 
 class Odom: #for a 3DOF mobile robot
@@ -35,10 +34,18 @@ def quaternion_to_euler(quaternion):
 
 def quat_to_yaw(quat): 
     #assumes rot around z only
-    q = Quaternion(quat.w, quat.x, quat.y, quat.z)
     q_np = np.array([quat.w, quat.x, quat.y, quat.z])
     euler_angles = quaternion_to_euler(q_np)
     return euler_angles[2]
+
+def angleaxis_to_quat(axis, angle):
+    ax,ay,az = axis
+    qx = ax*np.sin(angle/2)
+    qy = ay*np.sin(angle/2)
+    qz = az*np.sin(angle/2)
+    qw = np.cos(angle/2)
+
+    return [qw,qx,qy,qz]
 
 #ROS callback functions
 def odomCB(odom_msg):
@@ -123,11 +130,11 @@ def toPose(x,y,theta):
     pos.position.x = x
     pos.position.y = y
 
-    orient = Quaternion(axis = (0.0, 0.0, 1.0), radians = theta)
-    pos.orientation.w = orient.w
-    pos.orientation.x = orient.x
-    pos.orientation.y = orient.y
-    pos.orientation.z = orient.z
+    orient = angleaxis_to_quat([0,0,1], theta)
+    pos.orientation.w = orient[0]
+    pos.orientation.x = orient[1]
+    pos.orientation.y = orient[2]
+    pos.orientation.z = orient[3]
     return pos
 
 def toPoseArr(pose_list):
