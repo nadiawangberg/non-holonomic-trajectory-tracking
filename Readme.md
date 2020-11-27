@@ -14,3 +14,8 @@ To make the path into a trajectory a timing law is needed. From chapter "11.5.4 
 ### Trajectory tracking
 From chapter "11.6.1 Trajectory Tracking" a control algorithm was implemented that made the mobile robot track the trajectory. 
 
+### How to run
+
+`roslaunch turtlebot3_fake turtlebot3_fake.launch`
+
+`rosrun traj_gen traj_gen.py 5 10 10 #meaning T=5, ki=10, kf=10`
