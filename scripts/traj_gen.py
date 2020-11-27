@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # license removed for brevity
 import rospy
+import sys
 from std_msgs.msg import String
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped, Pose, Twist, PoseArray
@@ -21,12 +22,11 @@ vd, wd = 0,0 #desired vel and angular vel in body frame
 step = 0
 
 
-
 #Quaterion functions
 def quaternion_to_euler(quaternion):
     quaternion_squared = quaternion ** 2
-    phi = np.arctan2(2*quaternion[3]*quaternion[2]+2*quaternion[0]*quaternion[1],quaternion_squared[0] - quaternion_squared[1] - quaternion_squared[2] + quaternion_squared[3])  # TODO: Convert from quaternion to euler angles
-    theta = np.arcsin(2*(quaternion[0]*quaternion[2]-2*quaternion[1]*quaternion[3]))  # TODO: Convert from quaternion to euler angles
+    phi = np.arctan2(2*quaternion[3]*quaternion[2]+2*quaternion[0]*quaternion[1],quaternion_squared[0] - quaternion_squared[1] - quaternion_squared[2] + quaternion_squared[3])
+    theta = np.arcsin(2*(quaternion[0]*quaternion[2]-2*quaternion[1]*quaternion[3]))
     psi =  np.arctan2(2*quaternion[1]*quaternion[2]+2*quaternion[0]*quaternion[3],quaternion_squared[0] + quaternion_squared[1] - quaternion_squared[2] - quaternion_squared[3])
 
     euler_angles = np.array([phi,theta,psi])
@@ -66,8 +66,8 @@ def goalCB(goal_msg):
     init_odom.theta = curr_odom.theta
     step = 0
 
-def CubicCartesianPolynomial(init_pose, goal_pose, s_arr, k): #find path
-    backward = False # k in (0,1)
+def CubicCartesianPolynomial(init_pose, goal_pose, s_arr, kf, ki, backward): #find path
+    # Ch11.5.3 - Path planning via Cartesian polynomials
     N = len(s_arr)
 
     x_arr = [None]*N
@@ -82,16 +82,16 @@ def CubicCartesianPolynomial(init_pose, goal_pose, s_arr, k): #find path
     xi, yi, thi = init_pose.x, init_pose.y, init_pose.theta
     xf, yf, thf = goal_pose.x, goal_pose.y, goal_pose.theta 
 
-    alpha_x = k*np.cos(thf) - 3*xf
-    alpha_y = k*np.sin(thf) - 3*yf
+    alpha_x = kf*np.cos(thf) - 3*xf
+    alpha_y = kf*np.sin(thf) - 3*yf
 
-    beta_x = k*np.cos(thi) + 3*xi
-    beta_y = k*np.sin(thi) + 3*yi
+    beta_x = ki*np.cos(thi) + 3*xi
+    beta_y = ki*np.sin(thi) + 3*yi
 
     #initial values
-    x_dash_arr[0] = k*np.cos(thi)
-    y_dash_arr[0] = k*np.sin(thi)
-    v_tilde_arr[0] = k
+    x_dash_arr[0] = ki*np.cos(thi)
+    y_dash_arr[0] = ki*np.sin(thi)
+    v_tilde_arr[0] = ki
     w_tilde_arr[0] = w_tilde_arr[1] = 0
     th_arr[0] = thi
 
@@ -116,7 +116,7 @@ def CubicCartesianPolynomial(init_pose, goal_pose, s_arr, k): #find path
             w_tilde_arr[i] = (y_dash2x*x_dash-x_dash2x*y_dash)/(x_dash**2+y_dash**2)
 
         #generate array of poses
-        pos = toPose(x_arr[i], y_arr[i], th_arr[i])
+        pos = toPose(x_arr[i], y_arr[i], ssa(th_arr[i]))
         pose_list.append(pos)
 
     return pose_list, v_tilde_arr, w_tilde_arr 
@@ -177,31 +177,30 @@ def control_lin(e1,e2,e3,  zeta,a,  wd,vd):
     return cmd_v,cmd_w
 
 
-def planner():
+def planner(T, ki, kf, backward):
+    rospy.init_node('planner_node', anonymous=True)
+
+    #Publishers
     cmd_vel_pub = rospy.Publisher('cmd_vel', Twist, queue_size=10)
     traj_debug_pub = rospy.Publisher('traj_debug', PoseArray, queue_size=10)
-
-    rospy.init_node('planner_node', anonymous=True)
     
-    #Subscrubur
+    #Subscribers
     rospy.Subscriber("odom", Odometry, odomCB)
     rospy.Subscriber("move_base_simple/goal", PoseStamped, goalCB)
     time_i = rospy.Time.now().to_sec()
 
-    hz = 60
-    rate = rospy.Rate(hz) # 30hz
+    hz = 30
+    rate = rospy.Rate(hz)
     while not rospy.is_shutdown():
         if goal_odom.x != None: #We have a goal
             
             #PLANNING
-            T = 8.0
             ds = 1/(hz*T)
             dsdtau = 1/T
             s_arr = list(np.arange(0,1,ds))
             N = len(s_arr)
            
-            path_k = 10 #tuning param for path
-            pose_list, v_tilde_arr, w_tilde_arr = CubicCartesianPolynomial(init_odom, goal_odom, s_arr, path_k)
+            pose_list, v_tilde_arr, w_tilde_arr = CubicCartesianPolynomial(init_odom, goal_odom, s_arr, kf, ki, backward)
             traj_debug_pub.publish(toPoseArr(pose_list))
 
             #CONTROL
@@ -218,13 +217,15 @@ def planner():
 
                 w_tild = w_tilde_arr[step]
                 v_tild = v_tilde_arr[step]
+                
+                #Timing law
                 vd = dsdtau*1/T*v_tild # (11.54)
                 wd = dsdtau*1/T*w_tild # (11.55)
 
 
-            #Feedback controller'
-            zeta = 1
-            a = 1
+            #Feedback controller
+            zeta = 1 # 1 for critical;  < 1 more stable more lame overdamped;   > 1 more unstable but faster underdamped
+            a = 1 # natural frequency; 
             e1,e2,e3 = find_error(odom_d, curr_odom)
             cmd_v,cmd_w = control_lin(e1,e2,e3,  zeta,a,  wd,vd)
 
@@ -237,6 +238,26 @@ def planner():
 
 if __name__ == '__main__':
     try:
-        planner()
+        if len(sys.argv) > 3:
+            print("Using specified parameters")
+            T = float(sys.argv[1])
+            ki = float(sys.argv[2])
+            kf = float(sys.argv[3])
+
+            if (ki<0) and (kf<0):
+                backward = True
+            elif (ki>0) and (kf>0):
+                backward = False
+            else:
+                print("ki and kf must have same sign!")
+                backward = False
+        else:
+            print("Default parameters used")
+            T = 8.0
+            ki = 10.0
+            kf = 10.0
+            backward = False      
+        print("T:" + str(T) + " ki:" +str(ki) + " kf:" + str(kf))
+        planner(T, ki, kf, backward)
     except rospy.ROSInterruptException:
         pass
