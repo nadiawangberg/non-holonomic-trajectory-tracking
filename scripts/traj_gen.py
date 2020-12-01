@@ -2,8 +2,11 @@
 # license removed for brevity
 import rospy
 import sys
+
+from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import String
 from nav_msgs.msg import Odometry
+
 from geometry_msgs.msg import PoseStamped, Pose, Twist, PoseArray
 import numpy as np
 
@@ -17,6 +20,8 @@ odom_d = Odom() # reference odom, Xd
 
 goal_odom = Odom() #end of trajectory pose, Xf
 init_odom = Odom() #start of trajectory pose, X0
+
+obstacle = False
 
 vd, wd = 0,0 #desired vel and angular vel in body frame
 step = 0
@@ -65,6 +70,14 @@ def goalCB(goal_msg):
     init_odom.y = curr_odom.y
     init_odom.theta = curr_odom.theta
     step = 0
+
+def obstacleCB(data):
+        global obstacle
+        num_points = data.width
+        if num_points >= 1: #TODO, dont hardcode these numbers...
+            obstacle = True
+        elif num_points <= 0:
+            obstacle = False
 
 def CubicCartesianPolynomial(init_pose, goal_pose, s_arr, kf, ki, backward): #find path
     # Ch11.5.3 - Path planning via Cartesian polynomials
@@ -139,7 +152,7 @@ def toPose(x,y,theta):
 
 def toPoseArr(pose_list):
     pose_arr = PoseArray()
-    pose_arr.header.frame_id = 'odom'
+    pose_arr.header.frame_id = 'map'
     pose_arr.header.stamp = rospy.Time.now()
     pose_arr.poses = pose_list
     return pose_arr
@@ -176,24 +189,34 @@ def control_lin(e1,e2,e3,  zeta,a,  wd,vd):
 
     return cmd_v,cmd_w
 
+def close_enough(pose1, pose2):
+    x_err = pose1.x - pose2.x
+    y_err = pose1.y - pose2.y
+
+    return np.sqrt(x_err**2 + y_err**2) < 0.1
 
 def planner(T, ki, kf, backward):
+    global curr_odom, init_odom, goal_odom
+
     rospy.init_node('planner_node', anonymous=True)
 
     #Publishers
-    cmd_vel_pub = rospy.Publisher('cmd_vel', Twist, queue_size=10)
+    cmd_vel_pub = rospy.Publisher('cognite/auto/cmd_vel', Twist, queue_size=10)
     traj_debug_pub = rospy.Publisher('traj_debug', PoseArray, queue_size=10)
     
     #Subscribers
-    rospy.Subscriber("odom", Odometry, odomCB)
+    rospy.Subscriber("odometry/filtered_map", Odometry, odomCB)
     rospy.Subscriber("move_base_simple/goal", PoseStamped, goalCB)
+    rospy.Subscriber("voxel_grid/output", PointCloud2, obstacleCB)
+
     time_i = rospy.Time.now().to_sec()
 
     hz = 30
     rate = rospy.Rate(hz)
     while not rospy.is_shutdown():
-        if goal_odom.x != None: #We have a goal
-            
+        cmd_vel = Twist()
+
+        if goal_odom.x != None and not close_enough(curr_odom, goal_odom): #goal has been initialized
             #PLANNING
             ds = 1/(hz*T)
             dsdtau = 1/T
@@ -222,7 +245,6 @@ def planner(T, ki, kf, backward):
                 vd = dsdtau*1/T*v_tild # (11.54)
                 wd = dsdtau*1/T*w_tild # (11.55)
 
-
             #Feedback controller
             zeta = 1 # 1 for critical;  < 1 more stable more lame overdamped;   > 1 more unstable but faster underdamped
             a = 1 # natural frequency; 
@@ -232,7 +254,20 @@ def planner(T, ki, kf, backward):
             cmd_vel = Twist()
             cmd_vel.linear.x = cmd_v
             cmd_vel.angular.z = cmd_w
-            cmd_vel_pub.publish(cmd_vel)
+
+            
+            global obstacle
+            if obstacle:
+                print("OBSTACLE!")
+                if cmd_vel.linear.x > 0: #planner is trying to go forward
+                    cmd_vel.linear.x = 0
+                    cmd_vel.angular.z = 0.5 #rad/s
+
+                init_odom.x = curr_odom.x #new start for path
+                init_odom.y = curr_odom.y #new start for path
+                init_odom.theta = curr_odom.theta #new start for path
+
+        cmd_vel_pub.publish(cmd_vel)
 
         rate.sleep()
 
