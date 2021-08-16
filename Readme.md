@@ -1,6 +1,6 @@
 
 # Trajectory tracking with mobile robots
-Project for the course TEK4030 at the University of Oslo. The goal of the project is to implement a trajectory tracking algorithm for ROS turtlebot, using algorithms from chapter 11 in Robotics Modelling, Planning and Control by Siciliano et al. All formulaes and figures below are from chapter 11. **Please see the full report TEK4030_project.pdf for further explanation**.
+The goal of the project is to implement a trajectory generation and tracking algorithm for ROS turtlebot, using algorithms from chapter 11 in Robotics Modelling, Planning and Control by Siciliano et al. All formulaes and figures below are from chapter 11. **Please see the full report report.pdf for further explanation**.
 
 Turtlebot was simulated in gazebo using the environment from [simulate-in-various-worlds tutorial](https://emanual.robotis.com/docs/en/platform/turtlebot3/simulation/#simulate-in-various-world). Although I mainly used [turtlebot3_fake](http://wiki.ros.org/turtlebot3_fake) with [keyboard teleop](http://wiki.ros.org/turtlebot_teleop/Tutorials/Keyboard%20Teleop) for manual control. 
 
@@ -25,7 +25,7 @@ From chapter "11.6.1 Trajectory Tracking" a control algorithm was implemented th
 ![image](https://user-images.githubusercontent.com/29915643/129526082-81237965-2513-4e9d-9771-7d96b5af0187.png)
 ![image](https://user-images.githubusercontent.com/29915643/129526089-209449c7-aafe-49e5-bb90-c1d3d7773525.png)
 
-See the written report TEK4030_report.pdf or Robotis Modelling,Planning and Control by Siciliano et al. to better understand the above formulae.
+See the written report report.pdf or Robotis Modelling,Planning and Control by Siciliano et al. to better understand the above formulae.
 
 ### How to run
 
