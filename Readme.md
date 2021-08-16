@@ -1,6 +1,6 @@
 
 # Trajectory tracking with mobile robots
-The goal of the project is to implement a trajectory generation and tracking algorithm for ROS turtlebot, using algorithms from chapter 11 in Robotics Modelling, Planning and Control by Siciliano et al. All formulaes and figures below are from chapter 11. **Please see the full report report.pdf for further explanation**.
+ROS implementation of trajectory planning and tracking for non-holonomic mobile robots. The algorithms were implemented from chapter 11 in Robotics Modelling, Planning and Control by Siciliano et al. The code was tested on TurtleBot3 Burger, both in simulator and on a real robot. All formulaes and figures below are from chapter 11. **Please see the full report for further explanation, report.pdf**.
 
 Turtlebot was simulated in gazebo using the environment from [simulate-in-various-worlds tutorial](https://emanual.robotis.com/docs/en/platform/turtlebot3/simulation/#simulate-in-various-world). Although I mainly used [turtlebot3_fake](http://wiki.ros.org/turtlebot3_fake) with [keyboard teleop](http://wiki.ros.org/turtlebot_teleop/Tutorials/Keyboard%20Teleop) for manual control. 
 
