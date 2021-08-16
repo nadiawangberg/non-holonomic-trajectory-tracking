@@ -1,18 +1,16 @@
 
 # G2 - Trajectory tracking with mobile robots
-Project for course TEK4030 at University of Oslo. Goal is to implement a trajectory tracking algorithm for ROS turtlebot, using algorithms from chapter 11 in Robotics Modelling, Planning and Control by Siciliano et al. All formulaes and figures below are from chapter 11 in this book. Please see the full report TEK4030_project.pdf for further explanation.
+Project for course TEK4030 at University of Oslo. Goal is to implement a trajectory tracking algorithm for ROS turtlebot, using algorithms from chapter 11 in Robotics Modelling, Planning and Control by Siciliano et al. All formulaes and figures below are from chapter 11 in this book. **Please see the full report TEK4030_project.pdf for further explanation**.
 
-Turtlebot was simulated in gazebo using https://emanual.robotis.com/docs/en/platform/turtlebot3/simulation/#simulate-in-various-world. Although I mainly used http://wiki.ros.org/turtlebot3_fake and http://wiki.ros.org/turtlebot_teleop/Tutorials/Keyboard%20Teleop for manual control. 
-
-![image](https://user-images.githubusercontent.com/29915643/129528350-0bdf3822-2b31-4b24-87c6-e72a4930eaf8.png)
-
+Turtlebot was simulated in gazebo using the environment from [simulate-in-various-worlds tutorial](https://emanual.robotis.com/docs/en/platform/turtlebot3/simulation/#simulate-in-various-world). Although I mainly used [turtlebot3_fake](http://wiki.ros.org/turtlebot3_fake) with [keyboard teleop](http://wiki.ros.org/turtlebot_teleop/Tutorials/Keyboard%20Teleop) for manual control. 
 
 ### Path Planning
 from chapter 11.5.3 Path Planning in the book Robotis Modelling,Planning and Control. The "Planning via Cartesian polynomials " cubic polynomial method was implemented.
 
+
 ![image](https://user-images.githubusercontent.com/29915643/129525653-98ff262a-03c5-4662-8525-ca72c6cad831.png)
 
-![image](https://user-images.githubusercontent.com/29915643/129528098-ff8f159a-887b-4049-bbd0-389669319122.png)
+![image](https://user-images.githubusercontent.com/29915643/129529741-cab4328e-7616-4c48-bc57-5829967778a0.png)
 
 
 
